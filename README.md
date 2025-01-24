@@ -1,5 +1,5 @@
 # Local-Run-Riskun
-[risk-extractor](https://aoi.naist.jp/riskun/)のインターネットなしでローカルでも動くバージョン．
+[risk-extractor](https://aoi.naist.jp/riskun/)のインターネット接続なし・ローカルLLMで動くバージョン．
 
 以下のシェルスクリプトを実行するとローカルホストでリスくんが起動．
 ```
