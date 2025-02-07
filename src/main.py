@@ -31,12 +31,12 @@ def set_streamlit():
     st.title("リスくん:chipmunk: リスク因子構造化システム")
     st.markdown("###### 脳卒中のリスク因子を構造化し、csv形式で出力するシステムです。")
 
-    st.sidebar.write("### サンプルファイルで実行する場合は以下のファイルをダウンロードしてください")
+    st.sidebar.write("### サンプルファイルで実行する場合は以下のファイルをダウンロードしてください。")
     sample_csv = pd.read_csv("data/sample3.csv")
     sample_csv = sample_csv.to_csv(index=False)
     ste.sidebar.download_button("sample data", sample_csv, f"riskun_sample.csv")
 
-    st.sidebar.markdown("### 因子構造化に用いるcsvファイルを選択してください")
+    st.sidebar.markdown("### 因子構造化に用いるcsvファイルを選択してください。")
     # ファイルアップロード
     uploaded_file = st.sidebar.file_uploader(
         "Choose a CSV file", accept_multiple_files=False
@@ -98,7 +98,7 @@ tokenizer, model = download_model(model_name="elyza/Llama-3-ELYZA-JP-8B")
 
 if uploaded_file:
     df = read_uploaded_file_as_utf8(uploaded_file)
-    st.write("入力ファイル (先頭5件までを表示)")
+    st.write(f"入力ファイル全{len(df)}件 (先頭5件までを表示)")
     st.dataframe(df.head(5))
     target_columns = st.selectbox(
         "カルテが記載されている項目を選んでください",
@@ -114,10 +114,15 @@ if uploaded_file:
                 df_json = generate(target_columns, df[target_columns][i], tokenizer, model)
                 display_df = df_json.copy()
                 display_df[target_columns] = display_df[target_columns].str[:10] + "..."
-                # display_df["診断名"] = display_df["診断名"].str[:5] + "..."
-                # display_df["プロブレムリスト"] = display_df["プロブレムリスト"].str[:5] + "..."
-                # display_df["外科治療歴の有無"] = display_df["外科治療歴の有無"].str[:5] + "..."
-
+                display_df["診断名"] = display_df["診断名"].apply(
+                    lambda x: x[:5] + "..." if isinstance(x, str) and len(x) > 5 else x
+                )
+                display_df["プロブレムリスト"] = display_df["プロブレムリスト"].apply(
+                    lambda x: x[:5] + "..." if isinstance(x, str) and len(x) > 5 else x
+                )
+                display_df["外科治療歴の有無"] = display_df["外科治療歴の有無"].apply(
+                    lambda x: x[:5] + "..." if isinstance(x, str) and len(x) > 5 else x
+                )
                 if i == 0:
                     output_df = df_json
                     mytable = st.table(display_df)
@@ -137,10 +142,24 @@ if uploaded_file:
         # href = f'<a href="data:application/octet-stream;base64,{b64}" download="{file_name}-riskun-{timestamp}.csv">Download Link</a>'
         # st.markdown(f"CSVファイルのダウンロード: {href}", unsafe_allow_html=True)
 
-        ste.download_button(
+        if ste.download_button(
             "Click to download data", csv, f"{file_name}-riskun-{timestamp}.csv"
-        )
+        ):
+            st.cache_data.clear()
+            st.cache_resource.clear()
+            # セマフォ解放（必要に応じて）
+            os.system("ipcs -s | awk '{print $2}' | xargs -n 1 ipcrm sem")
 
+            # キャッシュの削除（Linux 環境でのみ有効）
+            if os.name == "posix":  # Linux/macOS の場合のみ実行
+                os.system("sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null")
+
+        # # 修正後のcsvアップロード
+        # fixed_file = st.sidebar.file_uploader(
+        # "修正したcsvファイルがあればアップロードしてください。", accept_multiple_files=False
+        # )
+        # if fixed_file:
+        #     fixed_file.to_csv(f"../data/fixed/{file_name}-riskun-{timestamp}.csv")
 
         # クライアント側のJavaScriptコードを埋め込み
         shutdown_script = """
@@ -158,9 +177,10 @@ if uploaded_file:
 
         @flask_app.route('/shutdown', methods=['POST'])
         def shutdown():
+            print("タブが閉じられました。サーバーを停止します...")
             # サーバープロセスを停止
             os.kill(os.getpid(), signal.SIGTERM)
-            return '', 204
+            return '', 200
 
         # Flask サーバーをバックグラウンドで起動
         def start_flask():

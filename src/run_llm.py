@@ -3,19 +3,21 @@ import torch
 from transformers import AutoModelForCausalLM, AutoTokenizer
 from tqdm import tqdm
 import re
+import jaconv
+import logging
 
-DEFAULT_SYSTEM_PROMPT = """あなたは誠実で優秀な日本人の医師です。以下に示す電子カルテの記事から、指定された項目について情報を抽出し、厳密なJSON形式で出力してください。
+DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT = """あなたは誠実で優秀な日本人の医師です。以下に示す電子カルテの記事から、指定された項目について情報を抽出し、厳密なJSON形式で出力してください。
 
 #### 抽出する項目:
 1. 性別: 男性または女性を記録。記載がない場合は"U"。
-2. 身長 (cm): 数値を記載。記載がない場合は"U"。
-3. 体重 (kg): 数値を記載。記載がない場合は"U"。
-4. 年齢 (歳): 数値を記載。記載がない場合は"U"。
-5. HbA1c (%): 数値を記載。記載がない場合は"U"。
-6. CRP (mg/dL): 数値を記載。記載がない場合は"U"。
-7. 血圧 (mmHg): 収縮期と拡張期の両方を記載（例: "120/80"）。記載がない場合は"U"。
-8. 体温 (℃): 数値を記載。記載がない場合は"U"。
-9. 脈拍 (回/分): 数値を記載。記載がない場合は"U"。
+2. 身長 (cm): 数値を記載。単位は不要。記載がない場合は"U"。
+3. 体重 (kg): 数値を記載。単位は不要。記載がない場合は"U"。
+4. 年齢 (歳): 数値を記載。単位は不要。記載がない場合は"U"。
+5. HbA1c (%): 数値を記載。単位は不要。記載がない場合は"U"。
+6. CRP (mg/dL): 数値を記載。単位は不要。記載がない場合は"U"。
+7. 血圧 (mmHg): 収縮期と拡張期の両方を記載（例: "120/80"）。単位は不要。記載がない場合は"U"。
+8. 体温 (℃): 数値を記載。単位は不要。記載がない場合は"U"。
+9. 脈拍 (回/分): 数値を記載。単位は不要。記載がない場合は"U"。
 10. 糖尿病:
     - P: 糖尿病の診断あり
     - N: 糖尿病の診断なし
@@ -116,7 +118,7 @@ def output_response(DEFAULT_SYSTEM_PROMPT, text, tokenizer, model, temperature=0
     with torch.no_grad():
         output_ids = model.generate(
             token_ids.to(model.device),
-            max_new_tokens=1300,
+            max_new_tokens=600,
             do_sample=True,
             temperature=temperature,
             top_p=0.9,
@@ -136,19 +138,80 @@ def download_model(model_name="elyza/Llama-3-ELYZA-JP-8B"):
     )
     return tokenizer, model
 
+def custom_convert(text):
+    # まず全角化して、カタカナと記号を全角化
+    text = jaconv.h2z(text, kana=True, ascii=False, digit=False)
+    # 次にアルファベットだけを半角に
+    text = jaconv.z2h(text, ascii=True, digit=False, kana=False)
+    return text
+
+
+def normalize_columns(columns):
+    return (
+        columns.str.strip()  # 前後の空白を削除
+        .str.replace(r"\s+", "", regex=True)  # 空白をすべて削除
+        .str.replace(r"　", "")  # 全角スペースを削除
+    )
+
 
 def generate(target_columns, text, tokenizer, model):
+
+    columns = [
+        target_columns, "性別", "身長", "体重", "年齢", "HbA1c", "CRP", "血圧", "体温", "脈拍", "抗血小板薬", "抗凝固薬",
+        "スタチン", "糖尿病治療薬", "糖尿病", "喫煙", "飲酒", "診断名", "降圧薬", "プロブレムリスト", "外科治療歴の有無",
+        "発症前mRS", "入院前生活場所", "来院時PT-INR"
+    ]
+    columns = [custom_convert(col) for col in columns]
+
+    replace_rules = {
+    r".*喫煙.*": "喫煙",
+    r".*飲酒.*": "飲酒",
+    r".*抗凝固薬.*": "抗凝固薬",
+    r".*抗血小板薬.*": "抗血小板薬",
+    r".*スタチン.*": "スタチン",
+    r".*糖尿病治療薬.*": "糖尿病治療薬",
+    r".*降圧薬.*": "降圧薬",
+    r"\(.*?\)": "",
+    "（ワルファリン症例）":"",
+    "(ワルファリン症例)":"",
+    " ":""
+}
 
     response = output_response(DEFAULT_SYSTEM_PROMPT, text, tokenizer, model)
     pattern = r'"(.*?)":\s*"(.*?)"'
     matches = re.findall(pattern, response)
-    add_matches = [
-        (target_columns, text),
-    ]
+    add_matches = [(target_columns, text)]
     add_matches.extend(matches)
     df_json = pd.DataFrame([dict(add_matches)])
 
-    return df_json
+    df_columns = pd.Series(df_json.columns).replace(replace_rules, regex=True)
+    df_json.columns = df_columns
+    df_json = df_json.loc[:, ~df_json.columns.duplicated(keep='first')]
+
+    # 全角→半角変換を列名のみに適用
+    df_json.columns = [custom_convert(col) for col in df_json.columns]
+
+    logging.basicConfig(
+        filename='error_log.txt',  # ログファイル名
+        level=logging.INFO,        # ログレベル
+        format='%(asctime)s - %(message)s'  # ログのフォーマット
+    )
+
+    df_json.columns = normalize_columns(pd.Series(df_json.columns))
+    columns_to_check = normalize_columns(pd.Series(columns)).tolist()
+
+    existing_columns = set(df_json.columns)
+    # 不足している列を確認
+    missing_columns = [col for col in columns_to_check if col not in existing_columns]
+
+
+    # 不足しているカラムを一括追加（`ERR` の追加処理をループ外で行う）
+    for col in missing_columns:
+        df_json[col] = "ERR"
+        # ログに記録
+        logging.info(f"ERR Column: {col}, df_json.columns: {df_json.columns.tolist()}")
+
+    return df_json[columns]
 
 
 # if __name__ == "__main__":

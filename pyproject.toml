@@ -1,5 +1,5 @@
 [project]
-name = "riskun"
+name = "Local-Run-Riskun"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
@@ -7,10 +7,18 @@ requires-python = ">=3.12"
 dependencies = [
     "accelerate>=1.2.1",
     "flask>=3.1.0",
-    "ipykernel>=6.29.5",
+    "jaconv>=0.4.0",
     "pandas>=2.2.3",
     "streamlit>=1.41.1",
     "streamlit-ext>=0.1.15",
     "torch>=2.5.1",
     "transformers>=4.48.0",
+]
+
+[dependency-groups]
+dev = [
+    "ipykernel>=6.29.5",
+    "openpyxl>=3.1.5",
+    "scikit-learn>=1.6.1",
+    "seaborn>=0.13.2",
 ]

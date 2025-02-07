@@ -12,3 +12,5 @@ wheels/
 data/
 .DS_Store
 *.ipynb
+*.txt
+*.log
