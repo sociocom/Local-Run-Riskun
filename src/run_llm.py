@@ -1,14 +1,22 @@
-import pandas as pd
-import torch
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from tqdm import tqdm
+import os
 import re
+import pandas as pd
+from tqdm import tqdm
 import jaconv
 import logging
+import torch
+from transformers import AutoModelForCausalLM, AutoTokenizer
+import streamlit as st
 
-DEFAULT_SYSTEM_PROMPT = DEFAULT_SYSTEM_PROMPT = """あなたは誠実で優秀な日本人の医師です。以下に示す電子カルテの記事から、指定された項目について情報を抽出し、厳密なJSON形式で出力してください。
+logging.basicConfig(level=logging.INFO)
+torch.classes.__path__ = [os.path.join(torch.__path__[0], torch.classes.__file__)] 
+# or simply:
+torch.classes.__path__ = []
 
-#### 抽出する項目:
+
+DEFAULT_SYSTEM_PROMPT = """あなたは誠実で優秀な日本人の医師です。以下に示す電子カルテの記事から、指定された項目について情報を抽出し、厳密なJSON形式で出力してください。
+
+#### 抽出する項目:å
 1. 性別: 男性または女性を記録。記載がない場合は"U"。
 2. 身長 (cm): 数値を記載。単位は不要。記載がない場合は"U"。
 3. 体重 (kg): 数値を記載。単位は不要。記載がない場合は"U"。
@@ -118,10 +126,10 @@ def output_response(DEFAULT_SYSTEM_PROMPT, text, tokenizer, model, temperature=0
     with torch.no_grad():
         output_ids = model.generate(
             token_ids.to(model.device),
-            max_new_tokens=600,
-            do_sample=True,
-            temperature=temperature,
-            top_p=0.9,
+            max_new_tokens=400,
+            do_sample=False,
+            # temperature=temperature,
+            # top_p=0.9,
             pad_token_id=tokenizer.eos_token_id,
         )
 
@@ -131,12 +139,17 @@ def output_response(DEFAULT_SYSTEM_PROMPT, text, tokenizer, model, temperature=0
 
     return output
 
+
+@st.cache_resource
 def download_model(model_name="elyza/Llama-3-ELYZA-JP-8B"):
     tokenizer = AutoTokenizer.from_pretrained(model_name)
     model = AutoModelForCausalLM.from_pretrained(
         model_name, torch_dtype="auto", device_map="auto"
     )
+    model.eval()
+    logging.info("モデルをロードしました")
     return tokenizer, model
+
 
 def custom_convert(text):
     # まず全角化して、カタカナと記号を全角化
@@ -204,12 +217,11 @@ def generate(target_columns, text, tokenizer, model):
     # 不足している列を確認
     missing_columns = [col for col in columns_to_check if col not in existing_columns]
 
-
     # 不足しているカラムを一括追加（`ERR` の追加処理をループ外で行う）
     for col in missing_columns:
-        df_json[col] = "ERR"
         # ログに記録
         logging.info(f"ERR Column: {col}, df_json.columns: {df_json.columns.tolist()}")
+        df_json[col] = "ERR"
 
     return df_json[columns]
 

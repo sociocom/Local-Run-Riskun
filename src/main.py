@@ -6,12 +6,6 @@ import streamlit as st
 import streamlit_ext as ste
 from io import StringIO
 import os
-from flask import Flask
-from werkzeug.middleware.dispatcher import DispatcherMiddleware
-from werkzeug.serving import make_server
-import signal
-import threading
-
 
 def set_streamlit():
     # カスタムテーマの定義
@@ -34,7 +28,7 @@ def set_streamlit():
     st.sidebar.write("### サンプルファイルで実行する場合は以下のファイルをダウンロードしてください。")
     sample_csv = pd.read_csv("data/sample3.csv")
     sample_csv = sample_csv.to_csv(index=False)
-    ste.sidebar.download_button("sample data", sample_csv, f"riskun_sample.csv")
+    ste.sidebar.download_button("sample data", sample_csv, "riskun_sample.csv")
 
     st.sidebar.markdown("### 因子構造化に用いるcsvファイルを選択してください。")
     # ファイルアップロード
@@ -49,7 +43,7 @@ def convert_to_utf8(content, encoding):
     except UnicodeDecodeError:
         return None
 
-
+@st.cache_data
 def read_uploaded_file_as_utf8(uploaded_file):
     # ファイルをバイナリモードで読み込み
     content = uploaded_file.read()
@@ -81,20 +75,10 @@ def read_uploaded_file_as_utf8(uploaded_file):
     return df
 
 
-def replace_spaces(text):
-    # 2つ以上連続したスペースを1つのスペースに置換
-    text = re.sub(r" {2,}", " ", text)
-    # タブをスペースに置換
-    text = re.sub(r"\t", " ", text)
-    return text
-
-
 os.environ["STREAMLIT_CONFIG"] = "config.toml"
 
 # def main():
 uploaded_file = set_streamlit()
-
-tokenizer, model = download_model(model_name="elyza/Llama-3-ELYZA-JP-8B")
 
 if uploaded_file:
     df = read_uploaded_file_as_utf8(uploaded_file)
@@ -110,6 +94,7 @@ if uploaded_file:
 
     if target_columns:
         with st.spinner("実行中..."):
+            tokenizer, model = download_model(model_name="elyza/Llama-3-ELYZA-JP-8B")
             for i in range(len(df)):
                 df_json = generate(target_columns, df[target_columns][i], tokenizer, model)
                 display_df = df_json.copy()
@@ -148,11 +133,7 @@ if uploaded_file:
             st.cache_data.clear()
             st.cache_resource.clear()
             # セマフォ解放（必要に応じて）
-            os.system("ipcs -s | awk '{print $2}' | xargs -n 1 ipcrm sem")
-
-            # キャッシュの削除（Linux 環境でのみ有効）
-            if os.name == "posix":  # Linux/macOS の場合のみ実行
-                os.system("sync; echo 3 | sudo tee /proc/sys/vm/drop_caches > /dev/null")
+            os.system("ipcs -s | awk 'NR>2 {print $2}' | xargs -n 1 ipcrm -s")
 
         # # 修正後のcsvアップロード
         # fixed_file = st.sidebar.file_uploader(
@@ -171,21 +152,3 @@ if uploaded_file:
         </script>
         """
         st.markdown(shutdown_script, unsafe_allow_html=True)
-
-        # Flask アプリケーションの作成
-        flask_app = Flask(__name__)
-
-        @flask_app.route('/shutdown', methods=['POST'])
-        def shutdown():
-            print("タブが閉じられました。サーバーを停止します...")
-            # サーバープロセスを停止
-            os.kill(os.getpid(), signal.SIGTERM)
-            return '', 200
-
-        # Flask サーバーをバックグラウンドで起動
-        def start_flask():
-            print("Flask サーバーを起動中...")
-            server = make_server('127.0.0.1', 8888, DispatcherMiddleware(flask_app))
-            server.serve_forever()
-
-        threading.Thread(target=start_flask, daemon=True).start()
